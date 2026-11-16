@@ -623,14 +623,20 @@ class MainActivity: FlutterActivity() {
         // Surface vsync 跑屏原生刷新率，弹幕才能 120fps（DFM+ render 本身
         // 仅 ~1ms，瓶颈完全是 acquire 等 vsync）。实测：双击触发的瞬时
         // 120fps 段 acquire 降到 0.04ms，证明渲染能力足够，只是被 60Hz 限。
-        @Suppress("DEPRECATION")
-        val disp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display else windowManager.defaultDisplay
-        val modes = disp?.supportedModes
-        if (!modes.isNullOrEmpty()) {
-            val highRefreshMode = modes.maxByOrNull { it.refreshRate }
-            if (highRefreshMode != null) {
-                window.attributes = window.attributes.apply {
-                    preferredDisplayModeId = highRefreshMode.modeId
+        // Display.getSupportedModes() 与 WindowManager.LayoutParams.preferredDisplayModeId
+        // 都是 API 23+ 才引入的。API 19（Android 4.4 legacy 构建）上直接调用会抛
+        // NoSuchMethodError 导致 onCreate 即崩溃；4.4 时代也没有可变刷新率概念，
+        // 直接跳过即可。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            @Suppress("DEPRECATION")
+            val disp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display else windowManager.defaultDisplay
+            val modes = disp?.supportedModes
+            if (!modes.isNullOrEmpty()) {
+                val highRefreshMode = modes.maxByOrNull { it.refreshRate }
+                if (highRefreshMode != null) {
+                    window.attributes = window.attributes.apply {
+                        preferredDisplayModeId = highRefreshMode.modeId
+                    }
                 }
             }
         }
