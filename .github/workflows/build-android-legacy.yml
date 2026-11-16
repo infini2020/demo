@@ -105,6 +105,13 @@ jobs:
         shell: bash
         run: flutter pub get
 
+      - name: Patch legacy-incompatible pub packages
+        shell: bash
+        # 必须在 pub get 之后：修补对象位于 pub 缓存内。
+        # 目前给 screen_brightness_android 补 androidx.core:core-ktx（其源码用了
+        # .toUri() 但未声明依赖，legacy 的 Kotlin 编译报 Unresolved reference）。
+        run: python3 scripts/patch_legacy_pub_cache.py
+
       - name: Install legacy NDK r25b
         shell: bash
         run: |
