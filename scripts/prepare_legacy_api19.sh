@@ -8,7 +8,9 @@
 #      并用 3.19 兼容 shim 替换 desktop_multi_window。
 #   4. 调用 migrate_legacy_api19.py 批量迁移 Dart 代码 API。
 #
-# 已在本仓库验证：经此脚本后 flutter analyze (3.19.6) 零编译错误。
+# 已在 CI 验证：经此脚本后 `flutter pub get` 可成功解析依赖。
+# 注意：Dart 代码编译尚未通过（仍有 454 个编译错误），详见
+#       docs/android-legacy-api19.md 的「CI 实测状态」一节。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

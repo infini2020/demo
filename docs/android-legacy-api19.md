@@ -31,10 +31,13 @@
 #        ndk;25.2.9519653、cmake;3.22.1、build-tools;29.0.3）
 export NIPAPLAY_LEGACY=1
 rm -f pubspec.lock pubspec_overrides.ohos.yaml pubspec_overrides.tvos.yaml
-bash scripts/prepare_legacy_api19.sh   # 依赖降级 + Dart API 迁移（已验证零编译错误）
+bash scripts/prepare_legacy_api19.sh   # 依赖降级 + Dart API 迁移
 flutter pub get
 flutter build apk --release --target-platform android-arm
 ```
+
+> ⚠️ 当前**尚未构建成功**：依赖解析与 Gradle 配置已通过，但 Dart 编译仍有 454 个
+> 错误未修（见下文「CI 实测状态」）。
 
 `-Plegacy-apk` / `NIPAPLAY_LEGACY=1` 会同时切换 `android/build.gradle`（NDK/Kotlin 版本）
 与 `android/app/build.gradle`（minSdk/targetSdk/ABI）中的 legacy 分支。
@@ -70,51 +73,53 @@ flutter build apk --release --target-platform android-arm
   文件同时检查 `-Plegacy-apk` 属性，供本地 `cd android && ./gradlew`
   直接构建时使用）。
 
-### 已验证：Dart 依赖解析与代码编译
+### 已验证：Dart 依赖解析
 
-**本仓库已用 Flutter 3.19.6 (Dart 3.3.4) 实际验证：**
+**Flutter 3.19.6 (Dart 3.3.4) 下的 `flutter pub get` 已在 CI 实际跑通（224 个包）。**
+需降级的依赖（由 `scripts/prepare_legacy_api19.sh` 自动处理）：
 
-- **依赖解析**：`flutter pub get` 成功解析 224 个包。需降级的依赖
-  （由 `scripts/prepare_legacy_api19.sh` 自动处理）：
+| 依赖 | 主线 | Legacy | 原因 |
+|---|---|---|---|
+| flutter_rust_bridge | 2.12.0 | **2.7.0** (vendored patched) | 2.x 全系要求 Dart ≥3.4 |
+| erika_flutter | 0.3.5 | **0.3.5** (vendored patched) | 全系要求 Dart ≥3.5 |
+| universal_gamepad | git main | **git main** (vendored patched) | 要求 Dart ≥3.10.7 |
+| desktop_multi_window | vendored fork | **3.19 shim** | fork 依赖 Flutter 3.44 私有窗口 API |
+| permission_handler | 12.x | 11.3.1 | 12.x 要 Dart ≥3.5 |
+| package_info_plus | 10.x | 8.0.2 | 9.x+ 要 Dart ≥3.10 |
+| wakelock_plus | 1.7+ | 1.2.8 | 新版要 Dart ≥3.4 |
+| battery_plus | 7.x | 6.0.2 | 新版依赖 web ≥1.0 |
+| mobile_scanner | 7.x | 5.1.1 | 新版要 Dart ≥3.4 |
+| fluent_ui | 4.13+ | 4.9.2 ⚠️ | 4.10+ 要 Flutter ≥3.27；**4.9.2 仍用 `WidgetState*`，3.19 下无法编译** |
+| video_player | 2.9.5 | 2.9.2 | 新版要 Dart ≥3.4 |
+| webview_flutter | 4.13+ | 4.8.0 | 新版要 Dart ≥3.5 |
+| http | 1.3+ | 1.2.2 | 新版要 Dart ≥3.4 |
+| yaml | 3.1.3+ | 3.1.2 | 新版要 Dart ≥3.4 |
+| flutter_svg | 2.0.14 | 2.0.10+1 | 新版要 Dart ≥3.4 |
+| desktop_drop | 0.6+ | 0.4.4 | 0.5+ 要 Dart ≥3.4 |
+| dynamic_color | 1.9.0 | 1.8.1 ⚠️ | 1.9.0 起 `android/build.gradle.kts` 用 KGP 2.0 `compilerOptions`；1.8.1 又用了 `Color.toARGB32`（3.27+） |
+| screen_brightness_android | 2.1.6 | 2.1.3 | 2.1.6 同样是 KGP 2.0 `.kts`；2.1.3 仍为 Groovy + Kotlin 1.9.22 |
+| web (override) | 1.x | 0.5.1 | package:web ≥1.0 要 Dart ≥3.4 |
+| intl (override) | 0.20+ | 0.18.1 | SDK pin |
+| flutter_plugin_android_lifecycle (override) | 2.0.30+ | 2.0.17 | 新版要 Dart ≥3.4 |
 
-  | 依赖 | 主线 | Legacy | 原因 |
-  |---|---|---|---|
-  | flutter_rust_bridge | 2.12.0 | **2.7.0** (vendored patched) | 2.x 全系要求 Dart ≥3.4 |
-  | erika_flutter | 0.3.5 | **0.3.5** (vendored patched) | 全系要求 Dart ≥3.5 |
-  | universal_gamepad | git main | **git main** (vendored patched) | 要求 Dart ≥3.10.7 |
-  | desktop_multi_window | vendored fork | **3.19 shim** | fork 依赖 Flutter 3.44 私有窗口 API |
-  | permission_handler | 12.x | 11.3.1 | 12.x 要 Dart ≥3.5 |
-  | package_info_plus | 10.x | 8.0.2 | 9.x+ 要 Dart ≥3.10 |
-  | wakelock_plus | 1.7+ | 1.2.8 | 新版要 Dart ≥3.4 |
-  | battery_plus | 7.x | 6.0.2 | 新版依赖 web ≥1.0 |
-  | mobile_scanner | 7.x | 5.1.1 | 新版要 Dart ≥3.4 |
-  | fluent_ui | 4.13+ | 4.9.2 | 4.10+ 要 Flutter ≥3.27 |
-  | video_player | 2.9.5 | 2.9.2 | 新版要 Dart ≥3.4 |
-  | webview_flutter | 4.13+ | 4.8.0 | 新版要 Dart ≥3.5 |
-  | http | 1.3+ | 1.2.2 | 新版要 Dart ≥3.4 |
-  | yaml | 3.1.3+ | 3.1.2 | 新版要 Dart ≥3.4 |
-  | flutter_svg | 2.0.14 | 2.0.10+1 | 新版要 Dart ≥3.4 |
-  | desktop_drop | 0.6+ | 0.4.4 | 0.5+ 要 Dart ≥3.4 |
-  | web (override) | 1.x | 0.5.1 | package:web ≥1.0 要 Dart ≥3.4 |
-  | intl (override) | 0.20+ | 0.18.1 | SDK pin |
-  | flutter_plugin_android_lifecycle (override) | 2.0.30+ | 2.0.17 | 新版要 Dart ≥3.4 |
+### 代码编译：尚未通过
 
-- **代码编译**：`flutter analyze` 对 `lib/` 与参与 Android 编译的
-  `packages/*/lib`、`third_party/*/lib` **零编译错误**（0 errors）。
-  Flutter 3.27 API 用法已由 `scripts/migrate_legacy_api19.py` 批量迁移：
-  `Color.withValues` → `withOpacity`、`WidgetState` → `MaterialState`、
-  `Color.toARGB32` → `.value`、`Color.from` → `fromRGBO`、
-  `RoundedSuperellipseBorder` → `RoundedRectangleBorder`、
-  `SpringDescription.withDurationAndBounce` → `legacySpring()` helper、
-  `BackdropGroup/BackdropKey` → legacy stub、
-  `ImageFilter.isShaderFilterSupported/shader` → 降级为 blur、
-  `Theme.brightnessOf` → `MediaQuery.platformBrightnessOf`、
-  `CupertinoColors.transparent` → `Color(0x00000000)`、
-  `DialogTheme.barrierColor` → `.backgroundColor`、
-  `PopScope<T>` → `PopScope`、`onPopInvokedWithResult` → `onPopInvoked`、
-  `ColorScheme` 补 `background/onBackground`、
-  `surfaceContainerHighest` → `surfaceVariant` 等。
-  详见 `scripts/migrate_legacy_api19.py` 文件头注释。
+`scripts/migrate_legacy_api19.py` 已覆盖一批 Flutter 3.27 API 改名
+（`Color.withValues` → `withOpacity`、`WidgetState` → `MaterialState`、
+`Color.toARGB32` → `.value`、`Color.from` → `fromRGBO`、
+`RoundedSuperellipseBorder` → `RoundedRectangleBorder`、
+`SpringDescription.withDurationAndBounce` → `legacySpring()`、
+`BackdropGroup/BackdropKey` stub、`ImageFilter.shader` → blur、
+`Theme.brightnessOf` → `MediaQuery.platformBrightnessOf`、
+`CupertinoColors.transparent` → `Color(0x00000000)`、
+`DialogTheme.barrierColor` → `.backgroundColor`、
+`PopScope<T>` → `PopScope`、`onPopInvokedWithResult` → `onPopInvoked`、
+`ColorScheme` 补 `background/onBackground`、
+`surfaceContainerHighest` → `surfaceVariant` 等，详见该脚本文件头注释）。
+
+> ⚠️ **但 CI 实测仍有 454 个编译错误**——此前"`flutter analyze` 零编译错误"的
+> 结论不成立（离线 analyze 未覆盖实际参与 release 编译的路径与 hosted 包）。
+> 详细分类与修法见下一节「CI 实测状态」。
 
 - **desktop_multi_window shim**：fork 版深度依赖 Flutter 3.44 的
   `package:flutter/src/widgets/_window.dart` 等私有窗口 API，3.19 不存在。
@@ -144,6 +149,68 @@ flutter build apk --release --target-platform android-arm
    `dart:js_interop` 新 API（`JSString.toDart` 等），analyze 会报约 12 个
    error，但 Android 构建用 `dart:io` 条件 import 路径，不编译这些文件，
    不影响 APK 构建。
+
+## CI 实测状态（2026-11-16）
+
+已在 GitHub Actions 上用 `build-android-legacy.yml` 连续触发 5 次构建，逐层暴露并修掉了
+基础设施问题，目前**停在 Dart 编译阶段**，尚未产出 APK。
+
+### 已修复的阻塞点
+
+| # | 失败阶段 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | `flutter pub get` | `desktop_multi_window` 的 `flutter: ">=3.44.0"` 未被放宽（旧 sed 只匹配 `^3.x` 写法） | 改为按 `environment` 块逐行归一化 |
+| 2 | `flutter pub get` | `flutter_svg ≥2.0.11` 需 Dart ≥3.4；pin 规则因行尾注释 `# 用于显示SVG图标` 匹配不上 | 注释感知重写 + `dependency_overrides` |
+| 3 | `:app` 配置 | Flutter 3.19 的 `FlutterExtension` 没有 `versionCode`/`versionName` 属性 | legacy 分支改读 `local.properties`（3.19 模板做法） |
+| 4 | 插件配置 | `dynamic_color 1.9.0` / `screen_brightness_android 2.1.6` 的 `build.gradle.kts` 使用 KGP 2.0 的 `compilerOptions`，Kotlin 1.9.24 解析不了 | 固定到仍是 Groovy 的 1.8.1 / 2.1.3 |
+| 5 | `flutter build apk` | pubspec 的 `version` 没有 `+构建号`，`flutter.versionCode` 为空 | workflow 传 `--build-number=${{ github.run_number }}` |
+
+### 当前阻塞：454 个 Dart 编译错误
+
+| 来源 | 数量 | 根因 | 建议修法 |
+|---|---|---|---|
+| `fluent_ui 4.9.2`（hosted） | **290** | 使用 `WidgetState`/`WidgetStateProperty`（Flutter **3.22** 才有；3.19 只有 `MaterialState*`） | 再降到 4.7.x（改用 `MaterialState*` 的最后一支） |
+| `packages/liquid_glass_widgets`（本地 fork） | **89** | 绑定 Flutter 3.27/3.35+ 渲染 API：`BackdropKey`、`GlassMediaQuery`、`Color.a`、`toARGB32`、构造签名变更 | 给 legacy 一套同 API 的 stub（**4.4 版会失去玻璃效果**）或整体降级 |
+| `lib/` 应用代码 | 51 | `CupertinoButton.minimumSize`（23 处，3.19 叫 `minSize`）、`Color.a`、`CupertinoMediaQuery`、`requestFocus` 参数 | 扩充 `scripts/migrate_legacy_api19.py` |
+| `packages/adaptive_platform_ui`（iOS26 组件） | 22 | `Color.a`、`Colors`/`MaterialLocalizations` getter、模式匹配与常量表达式限制 | 同上 + 局部改写 |
+| `dynamic_color 1.8.1` | 2 | 使用 `Color.toARGB32`（3.27+） | 继续降到 1.7.x |
+
+典型错误样本：
+
+```text
+lib/themes/cupertino/widgets/cupertino_library_management_overview.dart:277:15:
+  Error: No named parameter with the name 'minimumSize'.
+fluent_ui-4.9.2/lib/src/controls/inputs/buttons/theme.dart:18:9:
+  Error: Type 'WidgetStateProperty' not found.
+liquid_glass_widgets/lib/src/renderer/rendering/liquid_glass_render_object.dart:24:5:
+  Error: Type 'BackdropKey' not found.
+dynamic_color-1.8.1/lib/src/harmonization.dart:
+  Error: The method 'toARGB32' isn't defined for the class 'Color'.
+```
+
+### 复现与查看日志
+
+```bash
+# 触发（需要对该仓库有 Actions 写权限的 token）
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  -d '{"ref":"main"}' \
+  "https://api.github.com/repos/<owner>/<repo>/actions/workflows/build-android-legacy.yml/dispatches"
+
+# 拉失败作业日志并只看编译错误
+JOB=$(curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/<owner>/<repo>/actions/runs/<run_id>/jobs" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["jobs"][0]["id"])')
+curl -sSL -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/<owner>/<repo>/actions/jobs/$JOB/logs" | grep -E "Error: "
+```
+
+### 加速建议
+
+若仓库内已备好 Flutter 3.19.6（如 `.legacy-tools/flutter`，配合 `HOME=.legacy-tools/home`
+与已填充的 pub cache），可用 `dart analyze` **离线**验证迁移效果，避免每次约 4 分钟的
+CI 往返。但离线 analyze 与 release 编译的可见范围不同，**最终必须以 CI 构建为准**——
+本轮 454 个错误正是离线 analyze 没能暴露出来的。
 
 ## media_kit armv7 .so 的验证方法（复现）
 
