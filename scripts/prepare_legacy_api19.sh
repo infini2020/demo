@@ -90,7 +90,16 @@ sed -i 's/^  permission_handler: \^12\.0\.0+1$/  permission_handler: 11.3.1/' pu
 sed -i 's/^  mobile_scanner: \^7\.2\.0$/  mobile_scanner: 5.1.1/' pubspec.yaml
 sed -i 's/^  fluent_ui: \^4\.13\.0$/  fluent_ui: 4.9.2/' pubspec.yaml
 sed -i 's/^  desktop_drop: \^0\.6\.1$/  desktop_drop: 0.4.4/' pubspec.yaml
-sed -i 's/^  flutter_svg: \^2\.0\.14$/  flutter_svg: 2.0.10+1/' pubspec.yaml
+# flutter_svg 2.0.11+ 要求 Dart >=3.4.0。该行行尾带注释（"# 用于显示SVG图标"），
+# 用 "^...$" 锚定的 sed 匹配不上，必须保留注释整体重写。
+python3 - <<'PY'
+import re
+src = open('pubspec.yaml').read()
+src = re.sub(r'^  flutter_svg: \^2\.0\.14(.*)$',
+             lambda m: '  flutter_svg: 2.0.10+1' + m.group(1),
+             src, count=1, flags=re.M)
+open('pubspec.yaml', 'w').write(src)
+PY
 sed -i 's/^  flutter_rust_bridge: 2\.12\.0$/  flutter_rust_bridge: 2.7.0/' pubspec.yaml
 
 # dependency_overrides：pin web/intl/lifecycle + vendored patched 副本
@@ -104,6 +113,8 @@ add = '''  # Legacy (Android 4.4/Dart 3.3): pin web to 0.5.x (package:web >=1.0 
   web: 0.5.1
   intl: 0.18.1
   flutter_plugin_android_lifecycle: 2.0.17
+  # flutter_svg 2.0.11+ 要求 Dart >=3.4.0，强制回退（直接依赖与传递依赖一并覆盖）。
+  flutter_svg: 2.0.10+1
   # Legacy: vendored frb 2.7.0 / erika 0.3.5 / universal_gamepad with relaxed SDK bounds.
   flutter_rust_bridge:
     path: .legacy-patches/flutter_rust_bridge
