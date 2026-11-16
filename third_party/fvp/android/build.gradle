@@ -55,7 +55,14 @@ android {
     }
 
     defaultConfig {
-        minSdkVersion 21    // lower version error in ndk 26. requires flutter > 3.19
+        // Android 4.4.2 (API 19) legacy 构建：fvp 注释已确认 NDK r25 下可低于 21
+        // （"lower version error in ndk 26"——legacy 使用 NDK r25b，不受此限制）。
+        // 主线构建保持 21 不变。
+        if (rootProject.hasProperty("legacy-apk") || System.getenv("NIPAPLAY_LEGACY") != null) {
+            minSdkVersion 19
+        } else {
+            minSdkVersion 21    // lower version error in ndk 26. requires flutter > 3.19
+        }
 
         externalNativeBuild {
             cmake {

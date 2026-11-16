@@ -70,3 +70,5 @@ docs/error.txt
 android/.kotlin/errors
 *.log
 /.codex_work
+.legacy-tools/
+.legacy-patches/

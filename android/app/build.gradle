@@ -37,8 +37,21 @@ android {
         applicationId = "com.aimessoft.nipaplay"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdkVersion 26
-        targetSdk = flutter.targetSdkVersion
+        // Android 4.4.2 (API 19) 适配：minSdk 降至 19。
+        // 依赖链要求：NDK r25b（最后支持 API 19 的 NDK）、Kotlin 1.9.x、
+        // Flutter ≤3.19（3.22 起 minSdk 升至 21）。ABI 需包含 armeabi-v7a。
+        // legacyApk 产物为 4.4 专用分支，普通构建仍按 flutter 配置。
+        if (project.hasProperty("legacy-apk") || System.getenv("NIPAPLAY_LEGACY") != null) {
+            minSdkVersion 19
+            targetSdk 28
+            // 4.4 设备只需 arm32；减少体积并避免 64 位混淆
+            ndk {
+                abiFilters 'armeabi-v7a'
+            }
+        } else {
+            minSdkVersion 26
+            targetSdk = flutter.targetSdkVersion
+        }
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         

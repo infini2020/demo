@@ -1,0 +1,149 @@
+name: Build Android Legacy (Android 4.4 / API 19)
+
+# Android 4.4.2 (API 19) 专用构建。
+#
+# 与主线 build-android.yml 的差异（详见 docs/android-legacy-api19.md）：
+#   1. Flutter 固定 3.19.6 —— 最后一个引擎 minSdk=19 的稳定版
+#      （Flutter 3.22 起引擎最低 API 21）。Dart 3.3.4。
+#   2. NDK r25b + Kotlin 1.9.24（由 NIPAPLAY_LEGACY=1 触发 android/build.gradle 分支）。
+#   3. minSdk 19、targetSdk 28、仅 armeabi-v7a ABI。
+#   4. 构建前调用 scripts/prepare_legacy_api19.sh 完成依赖降级与 Dart API 迁移
+#      （已验证 flutter analyze 零编译错误）。
+#
+# 该产物为"尽力而为"的实验性支持。
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      SIGNING_KEY:
+        description: 'Base64 编码的签名密钥'
+        required: false
+      KEY_STORE_PASSWORD:
+        description: 'Keystore 密码'
+        required: false
+      ALIAS:
+        description: '密钥别名'
+        required: false
+      KEY_PASSWORD:
+        description: '密钥密码'
+        required: false
+
+env:
+  # 告诉 android/build.gradle 与 android/app/build.gradle 进入 legacy 分支
+  NIPAPLAY_LEGACY: "1"
+  FLUTTER_VERSION_LEGACY: "3.19.6"
+  ERIKA_PREBUILT: "1"
+
+jobs:
+  build:
+    name: Build Android Legacy APK (API 19 / armeabi-v7a)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Free workspace disk (pre-cache)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /opt/ghc \
+            /usr/local/lib/android/sdk/system-images \
+            /usr/local/lib/android/sdk/emulator \
+            /usr/local/lib/android/sdk/ndk/*
+          df -h
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Accept Android SDK licenses
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          set -o pipefail
+
+      - name: Install Android packaging dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends p7zip-full
+
+      - name: Setup Flutter (legacy 3.19.6)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION_LEGACY }}
+          channel: stable
+          cache: true
+
+      - name: Prepare legacy dependencies and migrate Dart API
+        shell: bash
+        run: |
+          set -euo pipefail
+          # tvOS/HarmonyOS 专属 override 与 Flutter 3.19 不兼容，移除后解析。
+          rm -f pubspec_overrides.ohos.yaml pubspec_overrides.tvos.yaml
+          rm -f pubspec.lock
+          # 一键完成：SDK 约束放宽 + 依赖降级 + vendored patched 副本 +
+          # desktop_multi_window shim + Dart API 迁移。
+          bash scripts/prepare_legacy_api19.sh
+
+      - name: Resolve dependencies
+        shell: bash
+        run: flutter pub get
+
+      - name: Install legacy NDK r25b
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          set +o pipefail
+          yes 2>/dev/null | sdkmanager --sdk_root="${SDK_ROOT}" \
+            "ndk;25.2.9519653" "cmake;3.22.1" "build-tools;29.0.3"
+          set -o pipefail
+          {
+            echo "ANDROID_NDK_HOME=${SDK_ROOT}/ndk/25.2.9519653"
+            echo "ANDROID_NDK_ROOT=${SDK_ROOT}/ndk/25.2.9519653"
+          } >> "$GITHUB_ENV"
+
+      - name: Build legacy APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          # NIPAPLAY_LEGACY=1（workflow 级 env）切换 gradle legacy 分支。
+          # 注意：flutter build apk 不透传 -P 属性，必须用环境变量。
+          flutter build apk --release --target-platform android-arm \
+            --obfuscate --split-debug-info=build/symbols-android-legacy
+
+      - name: Collect APK
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/app/outputs/apk/legacy
+          src="build/app/outputs/flutter-apk/app-release.apk"
+          [ -f "$src" ] || src="build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk"
+          [ -f "$src" ] || { echo "未找到 legacy APK"; ls -R build/app/outputs/flutter-apk || true; exit 1; }
+          ver=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: //;s/ *+.*//')
+          cp "$src" "build/app/outputs/apk/legacy/NipaPlay-${ver}-Android-4.4-legacy-armeabi-v7a.apk"
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+          ls -la build/app/outputs/apk/legacy/
+
+      - name: Upload legacy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-Android-legacy-api19
+          path: build/app/outputs/apk/legacy/*.apk

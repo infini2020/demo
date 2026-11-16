@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Legacy (Android 4.4 / Flutter 3.19 / Dart 3.3) 依赖准备脚本。
+#
+# 在 CI 的 `flutter pub get` 之前调用。完成三件事：
+#   1. 放宽 pubspec 与本地 path 包的 Dart/Flutter SDK 下限。
+#   2. 降级若干 pub 依赖到 Dart 3.3 兼容版本。
+#   3. 准备 vendored patched 副本（frb / erika / universal_gamepad），
+#      并用 3.19 兼容 shim 替换 desktop_multi_window。
+#   4. 调用 migrate_legacy_api19.py 批量迁移 Dart 代码 API。
+#
+# 已在本仓库验证：经此脚本后 flutter analyze (3.19.6) 零编译错误。
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+ROOT="$PWD"
+
+echo "=== [1/4] 放宽 SDK 约束 ==="
+# 主 pubspec：Dart ^3.5.3 -> >=3.3.0；移除 tvos/ohos 专属依赖块
+sed -i 's/^  sdk: \^3\.5\.3$/  sdk: ">=3.3.0 <4.0.0"/' pubspec.yaml
+python3 - <<'PY'
+import re
+src = open('pubspec.yaml').read()
+# 移除 tvos/ohos 专属依赖（git fork 与 ohos path 包）
+for name in ['shared_preferences_tvos','path_provider_tvos','package_info_plus_tvos',
+             'wakelock_plus_tvos','sqflite_tvos','video_player_tvos',
+             'permission_handler_ohos','wakelock_plus_ohos']:
+    src = re.sub(r'^  %s:\n(?:    .*\n|      .*\n)*' % name, '', src, flags=re.M)
+open('pubspec.yaml','w').write(src)
+PY
+
+# 本地 path 包：放宽 sdk/flutter 下限
+for f in packages/*/pubspec.yaml; do
+  sed -i -E 's/^(  sdk: )["'"'"']?\^3\.[5-9][0-9.]*["'"'"']?$/\1">=3.3.0 <4.0.0"/' "$f"
+  sed -i -E "s/^(  sdk: ['\"])[>=^]*3\.[5-9][0-9.]*.*(['\"])$/\1>=3.3.0 <4.0.0\2/" "$f"
+  sed -i -E 's/^(  flutter: )["'"'"']?\^?3\.[2-9][0-9.]*["'"'"']?$/\1">=3.19.0 <4.0.0"/' "$f"
+done
+
+echo "=== [2/4] 降级 pub 依赖 ==="
+# 已验证的 Dart 3.3 兼容版本组合
+sed -i 's/^  path: \^1\.9\.1$/  path: ^1.9.0/' pubspec.yaml
+sed -i 's/^  intl: \^0\.20\.2$/  intl: ^0.18.1/' pubspec.yaml
+sed -i 's/^  http: \^1\.3\.0$/  http: 1.2.2/' pubspec.yaml
+sed -i 's/^  yaml: \^3\.1\.3$/  yaml: 3.1.2/' pubspec.yaml
+sed -i 's/^  video_player: 2\.9\.5$/  video_player: 2.9.2/' pubspec.yaml
+sed -i 's/^  webview_flutter: \^4\.13\.1$/  webview_flutter: 4.8.0/' pubspec.yaml
+sed -i 's/^  battery_plus: \^7\.0\.0$/  battery_plus: 6.0.2/' pubspec.yaml
+sed -i 's/^  wakelock_plus: \^1\.7\.0$/  wakelock_plus: 1.2.8/' pubspec.yaml
+sed -i 's/^  package_info_plus: \^10\.2\.1$/  package_info_plus: 8.0.2/' pubspec.yaml
+sed -i 's/^  permission_handler: \^12\.0\.0+1$/  permission_handler: 11.3.1/' pubspec.yaml
+sed -i 's/^  mobile_scanner: \^7\.2\.0$/  mobile_scanner: 5.1.1/' pubspec.yaml
+sed -i 's/^  fluent_ui: \^4\.13\.0$/  fluent_ui: 4.9.2/' pubspec.yaml
+sed -i 's/^  desktop_drop: \^0\.6\.1$/  desktop_drop: 0.4.4/' pubspec.yaml
+sed -i 's/^  flutter_svg: \^2\.0\.14$/  flutter_svg: 2.0.10+1/' pubspec.yaml
+sed -i 's/^  flutter_rust_bridge: 2\.12\.0$/  flutter_rust_bridge: 2.7.0/' pubspec.yaml
+
+# dependency_overrides：pin web/intl/lifecycle + vendored patched 副本
+python3 - <<'PY'
+src = open('pubspec.yaml').read()
+if '  web: 0.5.1' not in src.split('dependency_overrides:',1)[-1].split('\n',1)[0] if 'dependency_overrides:' in src else True:
+    pass
+# 简单追加 overrides（若已存在则跳过）
+ovr = src[src.find('dependency_overrides:'):] if 'dependency_overrides:' in src else ''
+add = '''  # Legacy (Android 4.4/Dart 3.3): pin web to 0.5.x (package:web >=1.0 needs Dart 3.4).
+  web: 0.5.1
+  intl: 0.18.1
+  flutter_plugin_android_lifecycle: 2.0.17
+  # Legacy: vendored frb 2.7.0 / erika 0.3.5 / universal_gamepad with relaxed SDK bounds.
+  flutter_rust_bridge:
+    path: .legacy-patches/flutter_rust_bridge
+  erika_flutter:
+    path: .legacy-patches/erika_flutter
+  universal_gamepad:
+    path: .legacy-patches/universal_gamepad
+'''
+if 'web: 0.5.1' not in ovr:
+    src = src.replace('dependency_overrides:', 'dependency_overrides:\n' + add)
+    open('pubspec.yaml','w').write(src)
+PY
+
+echo "=== [3/4] 准备 vendored patched 副本 ==="
+mkdir -p .legacy-patches
+
+# frb 2.7.0：放宽 SDK 约束
+if [ ! -d .legacy-patches/flutter_rust_bridge ]; then
+  dart pub cache add flutter_rust_bridge --version 2.7.0 >/dev/null 2>&1 || true
+  cp -r "${HOME:-~}/.pub-cache/hosted/pub.dev/flutter_rust_bridge-2.7.0" \
+        .legacy-patches/flutter_rust_bridge
+  sed -i 's/sdk: ">=3\.4\.0 <4\.0\.0"/sdk: ">=3.3.0 <4.0.0"/' \
+        .legacy-patches/flutter_rust_bridge/pubspec.yaml
+fi
+
+# erika_flutter 0.3.5：放宽 SDK/Flutter/ffi 约束
+if [ ! -d .legacy-patches/erika_flutter ]; then
+  dart pub cache add erika_flutter --version 0.3.5 >/dev/null 2>&1 || true
+  cp -r "${HOME:-~}/.pub-cache/hosted/pub.dev/erika_flutter-0.3.5" \
+        .legacy-patches/erika_flutter
+  sed -i 's/sdk: ">=3\.5\.0 <4\.0\.0"/sdk: ">=3.3.0 <4.0.0"/; s/flutter: ">=3\.24\.0"/flutter: ">=3.19.0"/; s/ffi: \^2\.1\.4/ffi: ^2.1.0/' \
+        .legacy-patches/erika_flutter/pubspec.yaml
+fi
+
+# universal_gamepad：git clone + 放宽 SDK
+if [ ! -d .legacy-patches/universal_gamepad ]; then
+  git clone --depth 1 https://github.com/makabaka11/universal_gamepad.git \
+            .legacy-patches/universal_gamepad
+  sed -i 's/sdk: \^3\.10\.7/sdk: ">=3.3.0 <4.0.0"/; s/web: \^1\.1\.0/web: ">=0.5.0 <2.0.0"/' \
+        .legacy-patches/universal_gamepad/pubspec.yaml
+fi
+
+# desktop_multi_window：用 3.19 shim 替换（fork 依赖 Flutter 3.44 私有窗口 API）
+cp scripts/legacy_desktop_multi_window_shim.dart \
+   packages/desktop_multi_window/lib/desktop_multi_window.dart
+
+# frb_generated.dart：移除 3.19 不存在的命名参数
+python3 - <<'PY'
+f='lib/src/rust/frb_generated.dart'
+import os
+if os.path.exists(f):
+    src=open(f).read()
+    src=src.replace("    bool forceSameCodegenVersion = true,\n","")
+    src=src.replace("      forceSameCodegenVersion: forceSameCodegenVersion,\n","")
+    src=src.replace("    wasmBindgenName: 'wasm_bindgen',\n","")
+    open(f,'w').write(src)
+PY
+
+echo "=== [4/4] 迁移 Dart 代码 API ==="
+python3 scripts/migrate_legacy_api19.py lib packages/*/lib \
+       third_party/fvp/lib third_party/volume_controller/lib \
+       third_party/smb_connect/lib \
+       third_party/media-kit-upstream/libs \
+       third_party/media-kit-upstream/media_kit/lib \
+       third_party/media-kit-upstream/media_kit_video/lib \
+       packages/media_kit/lib packages/media_kit_video/lib
+
+# media_kit_video onPopInvokedWithResult
+find packages/media_kit_video third_party/media-kit-upstream/media_kit_video \
+     -name fullscreen_inherited_widget.dart \
+     -exec sed -i 's/onPopInvokedWithResult: (_, __)/onPopInvoked: (_)/g' {} +
+
+# liquid_glass_widgets 的 meta/logging 约束
+sed -i 's/^  meta: ">=1\.16\.0 <2\.0\.0"$/  meta: ">=1.11.0 <2.0.0"/' \
+    packages/liquid_glass_widgets/pubspec.yaml 2>/dev/null || true
+sed -i 's/^  logging: >=1\.3\.0$/  logging: ">=1.1.0 <3.0.0"/' \
+    packages/liquid_glass_widgets/pubspec.yaml 2>/dev/null || true
+sed -i 's/^  logging: \^1\.3\.0$/  logging: ">=1.1.0 <3.0.0"/' \
+    packages/liquid_glass_widgets/pubspec.yaml 2>/dev/null || true
+
+# ColorScheme 补 background/onBackground（app_theme.dart）
+python3 - <<'PY'
+import re
+f='lib/utils/app_theme.dart'
+src=open(f).read()
+src=src.replace('''          surface: Colors.white, // 表面颜色
+          onSurface: Colors.black87, // 在表面颜色上的文本和图标颜色''',
+'''          surface: Colors.white, // 表面颜色
+          background: Colors.white,
+          onSurface: Colors.black87, // 在表面颜色上的文本和图标颜色
+          onBackground: Colors.black87,''')
+src=src.replace('''          surface: Colors.black, // 表面颜色，深色模式下使用黑色。
+          onSurface: Colors.white, // 在表面颜色上的文本和图标颜色，确保对比度。''',
+'''          surface: Colors.black, // 表面颜色，深色模式下使用黑色。
+          background: Colors.black,
+          onSurface: Colors.white, // 在表面颜色上的文本和图标颜色，确保对比度。
+          onBackground: Colors.white,''')
+open(f,'w').write(src)
+PY
+
+echo "=== legacy 依赖与代码迁移完成 ==="

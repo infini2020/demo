@@ -1,7 +1,18 @@
-ext.android_ndk_version = '29.0.14206865'
+// Android 4.4.2 (API 19) 适配：NDK r25b 是最后一个支持 API 19 的 NDK
+// （r26 起 minSdk 升至 21，且 16KB page size、libc++ 变更均面向新系统）。
+if (project.hasProperty("legacy-apk") || System.getenv("NIPAPLAY_LEGACY") != null) {
+    ext.android_ndk_version = '25.2.9519653'
+} else {
+    ext.android_ndk_version = '29.0.14206865'
+}
 
 buildscript {
-    ext.kotlin_version = '2.3.21'
+    // Kotlin 2.x stdlib (2.1+) 的最低支持为 API 23+；API 19 需 Kotlin 1.9.x
+    if (project.hasProperty("legacy-apk") || System.getenv("NIPAPLAY_LEGACY") != null) {
+        ext.kotlin_version = '1.9.24'
+    } else {
+        ext.kotlin_version = '2.3.21'
+    }
     repositories {
         google()
         mavenCentral()

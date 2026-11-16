@@ -42,7 +42,12 @@ android {
     }
 
     defaultConfig {
-        minSdk 21
+        // Android 4.4.2 (API 19) legacy 构建
+        if (rootProject.hasProperty("legacy-apk") || System.getenv("NIPAPLAY_LEGACY") != null) {
+            minSdk 19
+        } else {
+            minSdk 21
+        }
     }
 
     dependencies {
