@@ -26,6 +26,16 @@ android {
     // Erika、应用 C++ 模块与打包的 libc++_shared.so 统一使用同一 NDK。
     ndkVersion = rootProject.ext.android_ndk_version
 
+    // legacy(API 19) 产物刻意使用 targetSdk 28（4.4 设备侧载，不进 Play）。
+    // Android Lint 的 ExpiredTargetSdkVersion 会让 lintVitalRelease 直接失败，
+    // 该规则只对 Play 上架有意义，因此 legacy 构建跳过 release lint。
+    if (isLegacyBuild) {
+        lint {
+            checkReleaseBuilds false
+            abortOnError false
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
