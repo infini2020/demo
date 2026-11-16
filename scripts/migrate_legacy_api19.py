@@ -121,22 +121,12 @@ def migrate(path: pathlib.Path):
     src = re.sub(r'\bWidgetStateProperty\b', 'MaterialStateProperty', src)
     src = re.sub(r'\bWidgetState\b', 'MaterialState', src)
 
-    # fluent_ui 4.7.7 使用自己的 ButtonState（不是 MaterialStateProperty）。
-    # 上面的 WidgetState→MaterialState 转换在 fluent_ui 上下文中是错的。
-    # 检测文件是否 import fluent_ui，若是则把 MaterialStateProperty(All) → ButtonState(all/resolveWith)
-    # 启发式：文件包含 fluent_ui 相关 import 或 SliderThemeData/ButtonStyle 的 fluent 前缀
-    if 'fluent_ui' in src or 'fluent.' in src or 'SliderThemeData' in src:
-        # MaterialStatePropertyAll<T>(value) -> ButtonState.all<T>(value)
-        src = re.sub(r'\bMaterialStatePropertyAll<(\w+)>\(([^)]+)\)',
-                     r'ButtonState.all<\1>(\2)', src)
-        # MaterialStateProperty.resolveWith<T>((states) => ...) -> ButtonState.resolveWith<T>((states) => ...)
-        src = re.sub(r'\bMaterialStateProperty\.resolveWith<(\w+)>\(',
-                     r'ButtonState.resolveWith<\1>(', src)
-        # MaterialState.disabled -> ButtonStates.disabled (fluent_ui 4.7 用 Set<ButtonStates>)
-        # 但这里 states 是 Set<MaterialState>；fluent_ui 的参数是 Set<ButtonStates>。
-        # 简化：保持 MaterialState 引用，但在 ButtonState.resolveWith 回调中类型不匹配。
-        # 实际上 fluent_ui 4.7 的 resolveWith 回调接收 Set<ButtonStates>。
-        # 这个转换太复杂，留给手动修。至少让 MaterialStateProperty→ButtonState 的类型匹配。
+    # fluent_ui 的 ButtonState 转换不在这里做。
+    # ButtonState.all / .resolveWith 是 fluent_ui 的**静态方法**（不是构造器），
+    # 调用点必须带 `fluent.` 前缀且不能带 const，还需要处理 <Color?> 这类带 `?`
+    # 的类型实参——这些在 migrate 里做不干净（曾产出 `const ButtonState.all<double>(4)`
+    # 与未转换的 `MaterialStateProperty.resolveWith<Color?>`）。
+    # 统一交给 scripts/fix_legacy_manual.py 的 fix_fluent_button_state()。
 
     # Matrix4.translateByDouble/scaleByDouble -> translate/scale
     src = re.sub(r'\.translateByDouble\(', '.translate(', src)
@@ -195,11 +185,10 @@ def migrate(path: pathlib.Path):
     # CupertinoColors.transparent -> const Color(0x00000000)
     src = src.replace('CupertinoColors.transparent', 'const Color(0x00000000)')
 
-    # CupertinoLocalizations.cancelButtonLabel -> MaterialLocalizations.cancelButtonLabel
-    src = src.replace('CupertinoLocalizations.of(context).cancelButtonLabel',
-                      'MaterialLocalizations.of(context).cancelButtonLabel')
-    src = src.replace('CupertinoLocalizations.of(ctx).cancelButtonLabel',
-                      'MaterialLocalizations.of(ctx).cancelButtonLabel')
+    # 注意：不要改 CupertinoLocalizations。
+    # CupertinoLocalizations.of(ctx).cancelButtonLabel 在 3.19 本来就存在；
+    # 早期规则把它换成 MaterialLocalizations，反而让只 import cupertino 的文件
+    # 报 “The getter 'MaterialLocalizations' isn't defined”。
 
     # Theme.brightnessOf -> MediaQuery.platformBrightnessOf
     src = src.replace('Theme.brightnessOf(context)',
@@ -227,8 +216,10 @@ def migrate(path: pathlib.Path):
     # Tooltip constraints: height != null ? BoxConstraints(...) : null, -> 删除（3 行块）
     src = re.sub(r'\n\s*constraints: height != null\s*\n\s*\?\s*BoxConstraints\([^\n]+\)\s*\n\s*: null,', '', src)
 
-    # CupertinoSwitch activeTrackColor -> trackColor
-    src = re.sub(r'\n\s*activeTrackColor: [^,\n]+,', '\n        trackColor: Colors.white,', src)
+    # CupertinoSwitch activeTrackColor (3.27+) -> trackColor (3.19)
+    # 只改参数名，保留原表达式——旧规则硬编码成 `trackColor: Colors.white`，
+    # 既丢掉了真实颜色，又在该文件未 import material 时引入 `Colors` 未定义错误。
+    src = re.sub(r'\bactiveTrackColor:', 'trackColor:', src)
 
     # Pixel.opacity -> Pixel.a (image package 4.x field rename)
     # 仅在明确 Pixel 上下文（pixel./seg.）

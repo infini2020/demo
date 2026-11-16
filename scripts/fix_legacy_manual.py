@@ -188,13 +188,20 @@ def fix_glass_spacing():
         open(f,'w').write(src)
 
 def fix_window_service_minimum_size():
-    """minimumSize -> minSize (shim API)。"""
+    """DesktopMultiWindow.createWindow 的 minimumSize -> minSize（shim API）。
+
+    不能无差别替换 `minimumSize:`：这些文件里还有本地辅助函数
+    `calculateHalfWidthBounds(minimumSize: ...)`，一起改名会让调用点与
+    形参声明不一致（CI 曾在 external_player_window_service.dart:60 报
+    “No named parameter with the name 'minSize'”）。只改 shim 的具名参数。
+    """
     for f in ['lib/services/desktop_player_window_service.dart',
               'lib/services/external_player_window_service.dart',
               'lib/services/external_player_console_window_service.dart']:
         if not os.path.exists(f): continue
         src = open(f).read()
-        src = re.sub(r'\bminimumSize:', 'minSize:', src)
+        src = re.sub(r'\bminimumSize:\s*(?=minimumWindowSizeForAspect\(|_minimumSizeFor\()',
+                     'minSize: ', src)
         open(f,'w').write(src)
 
 def fix_bangumi_image():
@@ -216,38 +223,96 @@ def fix_bangumi_image():
     open(f,'w').write(src)
 
 def fix_fluent_button_state():
-    """fluent_ui ButtonState 转换（import as fluent 前缀）。"""
+    """fluent_ui 4.7 的 ButtonState 转换。
+
+    fluent_ui 4.7.7 的定义（src/controls/utils/hover_button.dart）：
+        abstract class ButtonState<T> {
+          static ButtonState<T> all<T>(T value)
+          static ButtonState<T> resolveWith<T>(ButtonStateResolver<T> callback)
+        }
+    注意两点：all/resolveWith 是**静态方法**（不是构造器，不能带 const），
+    且必须带 `fluent.` 前缀；类型实参可能是 `Color?` 这种带 `?` 的形式。
+    """
     for f in ['lib/themes/nipaplay/widgets/large_screen_editable_slider.dart',
               'lib/themes/nipaplay/widgets/fluent_settings_switch.dart']:
         if not os.path.exists(f): continue
         src = open(f).read()
-        # MaterialStateProperty -> fluent.ButtonState
-        src = re.sub(r'\bMaterialStatePropertyAll<(\w+)>\(([^)]+)\)', r'fluent.ButtonState.all<\1>(\2)', src)
-        src = re.sub(r'\bMaterialStateProperty\.resolveWith<(\w+)>\(', r'fluent.ButtonState.resolveWith<\1>(', src)
+        # [^>]+ 才能吃下 Color? 这类带问号的类型实参
+        src = re.sub(r'\bMaterialStatePropertyAll<([^>]+)>\(', r'fluent.ButtonState.all<\1>(', src)
+        src = re.sub(r'\bMaterialStateProperty\.resolveWith<([^>]+)>\(', r'fluent.ButtonState.resolveWith<\1>(', src)
         src = re.sub(r'\bMaterialStateProperty\.resolveWith\(', r'fluent.ButtonState.resolveWith(', src)
+        src = re.sub(r'\bMaterialStateProperty\.all\(', r'fluent.ButtonState.all(', src)
+        # fluent_ui 4.7 的 resolveWith 回调收到 Set<ButtonStates>
         src = src.replace('MaterialState.disabled', 'fluent.ButtonStates.disabled')
-        # const ButtonState.all -> ButtonState.all (非 const)
-        src = src.replace('const fluent.ButtonState.all', 'fluent.ButtonState.all')
-        # resolveWith with disabled states -> 简化为 all（避免 Set 类型不匹配）
-        src = re.sub(
-            r'fluent\.ButtonState\.resolveWith<Color\?>\(\(states\) \{\s*return states\.contains\(fluent\.ButtonStates\.disabled\)\s*\?\s*[^;]+;\s*\}\)',
-            'fluent.ButtonState.all<Color?>(accent)', src)
+        # 静态方法调用不能带 const（const 只能在构造器上）
+        src = re.sub(r'\bconst\s+(fluent\.ButtonState\.(?:all|resolveWith))', r'\1', src)
         open(f,'w').write(src)
 
-def fix_cupertino_search_toolbar():
-    """multiline Size.square -> double。"""
-    f = 'lib/themes/cupertino/widgets/cupertino_media_search_toolbar.dart'
+def fix_cupertino_min_size():
+    """lib/themes/cupertino 下 CupertinoButton.minimumSize(Size) -> minSize(double)。
+
+    值可能是字面量，也可能是表达式（如 CupertinoMediaSearchToolbar.controlHeight），
+    并且常以多行 `const material.Size.square(...)` 形式出现——按 Size 结构解析，
+    不能只匹配数字字面量。
+
+    只作用于 cupertino 主题目录：Material 的 ButtonStyle.minimumSize 在 3.19
+    本来就是正确参数名，改了反而错。
+    """
+    def to_double(expr):
+        e = expr.strip()
+        return e + '.0' if re.fullmatch(r'\d+', e) else e
+
+    for f in glob.glob('lib/themes/cupertino/**/*.dart', recursive=True):
+        src = open(f).read(); orig = src
+        # Size.square(<expr>)
+        src = re.sub(
+            r'\bminimumSize:\s*(?:const\s+)?(?:material\.)?Size\.square\(\s*([^,()]+?)\s*,?\s*\)',
+            lambda m: 'minSize: ' + to_double(m.group(1)), src, flags=re.S)
+        # Size(<w>, <h>) -> 取max，折算成边长
+        def _wh(m):
+            try:
+                return 'minSize: %d.0' % max(int(float(m.group(1))), int(float(m.group(2))))
+            except ValueError:
+                return m.group(0)
+        src = re.sub(
+            r'\bminimumSize:\s*(?:const\s+)?(?:material\.)?Size\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,?\s*\)',
+            _wh, src, flags=re.S)
+        src = re.sub(r'\bminimumSize:\s*(?:const\s+)?(?:material\.)?Size\.zero', 'minSize: 0.0', src)
+        if src != orig: open(f,'w').write(src)
+
+def fix_theme_maybe_brightness():
+    """Theme.maybeBrightnessOf (3.27+) -> 3.19 等价写法。
+
+    3.19 没有 Theme.maybeBrightnessOf；原语义是“没有 Material 祖先时返回 null”，
+    用 findAncestorWidgetOfExactType<Theme>() 保持同样的可空行为。
+    """
+    f = 'packages/liquid_glass_widgets/lib/utils/glass_brightness.dart'
     if not os.path.exists(f): return
     src = open(f).read()
-    src = re.sub(r'minSize:\s*const material\.Size\.square\(\s*\n?\s*(\w+)\s*\n?\s*\)', r'minSize: \1', src)
+    src = src.replace('Theme.maybeBrightnessOf(context)',
+                      'context.findAncestorWidgetOfExactType<Theme>()?.data.brightness')
     open(f,'w').write(src)
 
 def fix_stretch_translate():
-    """4-arg translate -> 3-arg。"""
+    """多行 4 参 translate/scale -> 3 参。
+
+    单行形式（`..translateByDouble(a, b, 0.0, 1.0)`）已由 migrate 的
+    `, 1.0)` 规则处理；这里只补多行写法：
+        matrix.translate(
+          A,
+          B,
+          0.0,
+          1.0,
+        );
+    为防止误伤已经是 3 参的调用，要求尾部精确匹配 `0.0, 1.0` / `1.0, 1.0`。
+    """
     f = 'packages/liquid_glass_widgets/lib/src/renderer/stretch.dart'
     if not os.path.exists(f): return
     src = open(f).read()
-    src = re.sub(r'\.translate\(([^;]+?), 1\.0\)', r'.translate(\1)', src)
+    src = re.sub(r'\.translate\(\s*([^;]*?),\s*0\.0\s*,\s*1\.0\s*,?\s*\)',
+                 r'.translate(\1, 0.0)', src)
+    src = re.sub(r'\.scale\(\s*([^;]*?),\s*1\.0\s*,\s*1\.0\s*,?\s*\)',
+                 r'.scale(\1, 1.0)', src)
     open(f,'w').write(src)
 
 def fix_media_kit_pop():
@@ -289,7 +354,8 @@ if __name__ == '__main__':
     fix_window_service_minimum_size()
     fix_bangumi_image()
     fix_fluent_button_state()
-    fix_cupertino_search_toolbar()
+    fix_cupertino_min_size()
+    fix_theme_maybe_brightness()
     fix_stretch_translate()
     fix_media_kit_pop()
     fix_color_scheme()
