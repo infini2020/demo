@@ -8,14 +8,32 @@ namespace nipaplay::native {
 // ──── -ffast-math-safe NaN / Inf checks via bit inspection ────
 // std::isnan / std::isinf are undefined under -ffast-math (-ffinite-math-only).
 // C++20 std::bit_cast replaces memcpy-based type punning with a well-defined operation.
+//
+// 注意：legacy（Android 4.4 / NDK r25b）构建时 libc++ 里没有 std::bit_cast，
+// CI 报 "no member named 'bit_cast' in namespace 'std'"。clang 自 9.0 起提供
+// __builtin_bit_cast（同样可用于常量表达式），故优先用内建版本，
+// 仅当编译器没有该内建时才回退 std::bit_cast（例如 MSVC）。
+template <typename To, typename From>
+constexpr To np_bit_cast(const From& v) noexcept {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_bit_cast)
+    return __builtin_bit_cast(To, v);
+#else
+    return std::bit_cast<To>(v);
+#endif
+#else
+    return std::bit_cast<To>(v);
+#endif
+}
+
 constexpr bool np_isnan(double v) noexcept {
-    const auto bits = std::bit_cast<uint64_t>(v);
+    const auto bits = np_bit_cast<uint64_t>(v);
     // NaN: exponent all-1s (bits 52..62), mantissa non-zero (bits 0..51)
     return ((bits >> 52) & 0x7FFu) == 0x7FFu && (bits & 0x000FFFFFFFFFFFFFull) != 0;
 }
 
 constexpr bool np_isinf(double v) noexcept {
-    const auto bits = std::bit_cast<uint64_t>(v);
+    const auto bits = np_bit_cast<uint64_t>(v);
     // Inf: exponent all-1s, mantissa zero
     return ((bits >> 52) & 0x7FFu) == 0x7FFu && (bits & 0x000FFFFFFFFFFFFFull) == 0;
 }
