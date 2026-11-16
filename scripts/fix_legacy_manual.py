@@ -248,6 +248,50 @@ def fix_fluent_button_state():
         src = re.sub(r'\bconst\s+(fluent\.ButtonState\.(?:all|resolveWith))', r'\1', src)
         open(f,'w').write(src)
 
+def fix_cupertino_switch_track_color():
+    """CupertinoSwitch.activeTrackColor (3.27+) -> trackColor (3.19)。
+
+    只在确实使用 CupertinoSwitch 的文件里改名：Material 的 SliderThemeData 方向
+    正好相反（3.19 叫 activeTrackColor，3.27+ 叫 trackColor），全局改名会把
+    media_kit_video 的 SliderThemeData 改坏。
+    """
+    files = glob.glob('lib/**/*.dart', recursive=True) + \
+            glob.glob('packages/*/lib/**/*.dart', recursive=True) + \
+            glob.glob('third_party/*/lib/**/*.dart', recursive=True)
+    for f in files:
+        src = open(f).read()
+        if 'CupertinoSwitch(' not in src or 'activeTrackColor:' not in src:
+            continue
+        src = src.replace('activeTrackColor:', 'trackColor:')
+        open(f,'w').write(src)
+
+def fix_cupertino_cancel_label():
+    """CupertinoLocalizations.cancelButtonLabel -> MaterialLocalizations。
+
+    3.19 的 CupertinoLocalizations 只有 cut/copy/paste/clear/selectAll/lookUp/
+    searchWeb/share 这些标签，没有 cancelButtonLabel（该成员只在
+    MaterialLocalizations 里）。应用顶层是 MaterialApp 且注册了
+    GlobalMaterialLocalizations.delegate，运行时可用；只 import cupertino 的文件
+    需要补上 material import。
+    """
+    files = glob.glob('lib/**/*.dart', recursive=True) + \
+            glob.glob('packages/*/lib/**/*.dart', recursive=True) + \
+            glob.glob('third_party/*/lib/**/*.dart', recursive=True)
+    pat = re.compile(r'\bCupertinoLocalizations\.of\(([^)]+)\)\.cancelButtonLabel')
+    for f in files:
+        src = open(f).read()
+        if not pat.search(src):
+            continue
+        src = pat.sub(r'MaterialLocalizations.of(\1).cancelButtonLabel', src)
+        if ("import 'package:flutter/material.dart'" not in src
+                and 'import "package:flutter/material.dart"' not in src):
+            lines = src.split('\n')
+            last_import = max((i for i, l in enumerate(lines) if l.startswith('import ')), default=-1)
+            if last_import >= 0:
+                lines.insert(last_import + 1, "import 'package:flutter/material.dart';")
+                src = '\n'.join(lines)
+        open(f,'w').write(src)
+
 def fix_cupertino_min_size():
     """lib/themes/cupertino 下 CupertinoButton.minimumSize(Size) -> minSize(double)。
 
@@ -355,6 +399,8 @@ if __name__ == '__main__':
     fix_bangumi_image()
     fix_fluent_button_state()
     fix_cupertino_min_size()
+    fix_cupertino_switch_track_color()
+    fix_cupertino_cancel_label()
     fix_theme_maybe_brightness()
     fix_stretch_translate()
     fix_media_kit_pop()

@@ -216,10 +216,12 @@ def migrate(path: pathlib.Path):
     # Tooltip constraints: height != null ? BoxConstraints(...) : null, -> 删除（3 行块）
     src = re.sub(r'\n\s*constraints: height != null\s*\n\s*\?\s*BoxConstraints\([^\n]+\)\s*\n\s*: null,', '', src)
 
-    # CupertinoSwitch activeTrackColor (3.27+) -> trackColor (3.19)
-    # 只改参数名，保留原表达式——旧规则硬编码成 `trackColor: Colors.white`，
-    # 既丢掉了真实颜色，又在该文件未 import material 时引入 `Colors` 未定义错误。
-    src = re.sub(r'\bactiveTrackColor:', 'trackColor:', src)
+    # 注意：不要全局改 activeTrackColor。
+    # CupertinoSwitch 在 3.27+ 叫 activeTrackColor、3.19 叫 trackColor（需改名）；
+    # 但 Material 的 SliderThemeData 恰好相反：3.19 叫 activeTrackColor、3.27+ 叫
+    # trackColor。全局改名会把 media_kit_video 的 SliderThemeData 改坏
+    # （CI: “No named parameter with the name 'trackColor'”）。
+    # 因此 CupertinoSwitch 的改名交给 fix_legacy_manual.fix_cupertino_switch_track_color()。
 
     # Pixel.opacity -> Pixel.a (image package 4.x field rename)
     # 仅在明确 Pixel 上下文（pixel./seg.）
