@@ -161,6 +161,14 @@ if [ ! -d .legacy-patches/erika_flutter ]; then
         .legacy-patches/erika_flutter/pubspec.yaml
 fi
 
+# erika_flutter 的 ErikaMediaSession 整体建立在 API 21+/26+（MediaSession、
+# NotificationChannel、MediaStyle…）之上，而插件在 onAttachedToEngine 里无条件构造它。
+# API 19 上这会让插件注册抛 NoClassDefFoundError，GeneratedPluginRegistrant 中断，
+# erika 之后的所有插件都注册不上，Dart 端卡在首帧之前 —— 表现为启动后永久黑屏。
+# 这里替换为同 API 的空实现（仅 legacy），媒体通知/锁屏控制不可用，其余功能不受影响。
+cp scripts/legacy_erika_media_session_stub.kt \
+   .legacy-patches/erika_flutter/android/src/main/kotlin/dev/aimesoft/erika_flutter/ErikaMediaSession.kt
+
 # universal_gamepad：git clone + 放宽 SDK
 if [ ! -d .legacy-patches/universal_gamepad ]; then
   git clone --depth 1 https://github.com/makabaka11/universal_gamepad.git \
