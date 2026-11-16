@@ -268,6 +268,33 @@ def fix_media_kit_video_surface_producer():
                  '', src)
     open(f,'w').write(src)
 
+def fix_manifest_override_library():
+    """放行声明了更高 minSdk 的预编译 AAR（manifest 合并）。
+
+    flutter_js 依赖 JitPack 上的 com.github.fast-development.android-js-runtimes:
+    fastdev-jsruntimes-quickjs:0.3.6，该 AAR 的 AndroidManifest 声明了 minSdk 21，
+    于是 legacy（minSdk 19）在 processReleaseMainManifest 阶段失败：
+
+        uses-sdk:minSdkVersion 19 cannot be smaller than version 21 declared in
+        library [...fastdev-jsruntimes-quickjs:0.3.6]
+
+    AAR 是预编译产物，改不了它的 build.gradle，官方变通就是 tools:overrideLibrary。
+    风险：API 19 上若真的调用到 quickjs，可能运行期崩溃——属于 legacy "尽力而为"
+    范畴，构建阶段必须先放行。
+    """
+    f = 'android/app/src/main/AndroidManifest.xml'
+    if not os.path.exists(f): return
+    src = open(f).read()
+    if 'io.abner.fastdev.android.quickjs' in src: return
+    m = re.search(r'<manifest[^>]*>', src, re.S)
+    if not m: return
+    insert = ('\n    <!-- legacy(API 19): flutter_js 的 quickjs AAR 声明 minSdk 21，'
+              '构建期放行（运行期风险已知） -->\n'
+              '    <uses-sdk tools:overrideLibrary="io.abner.fastdev.android.quickjs" />')
+    src = src[:m.end()] + insert + src[m.end():]
+    open(f,'w').write(src)
+
+
 def fix_cupertino_switch_track_color():
     """CupertinoSwitch.activeTrackColor (3.27+) -> trackColor (3.19)。
 
@@ -420,6 +447,7 @@ if __name__ == '__main__':
     fix_fluent_button_state()
     fix_media_kit_video_surface_producer()
     fix_cupertino_min_size()
+    fix_manifest_override_library()
     fix_cupertino_switch_track_color()
     fix_cupertino_cancel_label()
     fix_theme_maybe_brightness()
