@@ -205,6 +205,38 @@ done
 cp scripts/legacy_desktop_multi_window_shim.dart \
    packages/desktop_multi_window/lib/desktop_multi_window.dart
 
+# MediaKitAndroidHelper 的 static 初始化裸调 System.loadLibrary("mediakitandroidhelper")。
+# 该 .so 依赖 API 21+ 的 libc 符号（strtof 等），在 API 19 上抛 UnsatisfiedLinkError，
+# 而它位于 GeneratedPluginRegistrant 的调用链上 —— 一次抛错就会中断后续所有插件注册，
+# Dart 端卡在首帧之前（黑屏）。
+# 加 try/catch 让注册继续：legacy 上 media_kit 原生播放不可用，但界面可以起来。
+python3 - <<'PY'
+import glob, re
+
+patched = 0
+for f in glob.glob('third_party/media-kit-upstream/libs/android/*/android/src/main/java/'
+                   'com/alexmercerind/mediakitandroidhelper/MediaKitAndroidHelper.java'):
+    src = open(f).read()
+    if 'legacy(API 19)' in src:
+        continue
+    new = re.sub(
+        r'static\s*\{\s*System\.loadLibrary\("mediakitandroidhelper"\);\s*\}',
+        'static {\n'
+        '        // legacy(API 19)：该库链接了 API 21+ 的 libc 符号，加载失败不应中断插件注册。\n'
+        '        try {\n'
+        '            System.loadLibrary("mediakitandroidhelper");\n'
+        '        } catch (Throwable e) {\n'
+        '            e.printStackTrace();\n'
+        '        }\n'
+        '    }',
+        src, count=1)
+    if new != src:
+        open(f, 'w').write(new)
+        patched += 1
+        print(f"patched: {f}")
+print(f"MediaKitAndroidHelper patched: {patched}")
+PY
+
 # frb_generated.dart：移除 3.19 不存在的命名参数
 python3 - <<'PY'
 f='lib/src/rust/frb_generated.dart'
