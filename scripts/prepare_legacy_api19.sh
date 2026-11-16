@@ -28,12 +28,52 @@ for name in ['shared_preferences_tvos','path_provider_tvos','package_info_plus_t
 open('pubspec.yaml','w').write(src)
 PY
 
-# 本地 path 包：放宽 sdk/flutter 下限
-for f in packages/*/pubspec.yaml; do
-  sed -i -E 's/^(  sdk: )["'"'"']?\^3\.[5-9][0-9.]*["'"'"']?$/\1">=3.3.0 <4.0.0"/' "$f"
-  sed -i -E "s/^(  sdk: ['\"])[>=^]*3\.[5-9][0-9.]*.*(['\"])$/\1>=3.3.0 <4.0.0\2/" "$f"
-  sed -i -E 's/^(  flutter: )["'"'"']?\^?3\.[2-9][0-9.]*["'"'"']?$/\1">=3.19.0 <4.0.0"/' "$f"
-done
+# 本地 path 包：放宽 sdk/flutter 下限。
+#
+# 约束写法并不统一：^3.5.3、^3.10.7、">=3.44.0"、">=3.47.0-0.3.pre" 都有。
+# 早期版本用 sed 匹配 "^3.x" caret 形式，漏掉了 ">=x" 形式，导致
+# desktop_multi_window 的 flutter: ">=3.44.0" 未被放宽，pub 解析直接失败：
+#   Because nipaplay depends on desktop_multi_window from path which requires
+#   Flutter SDK version >=3.44.0, version solving failed.
+# 因此改为按 environment 块逐行归一化，覆盖任意约束写法。
+relax_local_pubspecs() {
+  python3 - "$@" <<'PY'
+import re, sys
+
+SDK = '">=3.3.0 <4.0.0"'
+FLUTTER = '">=3.19.0"'
+
+def relax(path):
+    try:
+        lines = open(path, encoding='utf-8').read().splitlines(keepends=True)
+    except OSError:
+        return
+    out, in_env = [], False
+    for line in lines:
+        # 进入 environment: 块（该键必须顶格）
+        if re.match(r'^environment:\s*(#.*)?$', line):
+            in_env = True
+            out.append(line)
+            continue
+        if in_env:
+            # 遇到下一个顶格键即离开 environment 块
+            if line.strip() and not line.startswith((' ', '\t')):
+                in_env = False
+            elif re.match(r'^  sdk:', line):
+                out.append('  sdk: %s\n' % SDK)
+                continue
+            elif re.match(r'^  flutter:', line):
+                out.append('  flutter: %s\n' % FLUTTER)
+                continue
+        out.append(line)
+    open(path, 'w', encoding='utf-8').write(''.join(out))
+
+for p in sys.argv[1:]:
+    relax(p)
+PY
+}
+
+relax_local_pubspecs packages/*/pubspec.yaml
 
 echo "=== [2/4] 降级 pub 依赖 ==="
 # 已验证的 Dart 3.3 兼容版本组合
@@ -105,6 +145,10 @@ if [ ! -d .legacy-patches/universal_gamepad ]; then
   sed -i 's/sdk: \^3\.10\.7/sdk: ">=3.3.0 <4.0.0"/; s/web: \^1\.1\.0/web: ">=0.5.0 <2.0.0"/' \
         .legacy-patches/universal_gamepad/pubspec.yaml
 fi
+
+# vendored 副本：同样按 environment 块归一化（各包约束写法不同，含 ">=x" 形式）。
+# 上面逐个包做的 sed 只覆盖特定写法，这里兜底。
+relax_local_pubspecs .legacy-patches/*/pubspec.yaml
 
 # desktop_multi_window：用 3.19 shim 替换（fork 依赖 Flutter 3.44 私有窗口 API）
 cp scripts/legacy_desktop_multi_window_shim.dart \
