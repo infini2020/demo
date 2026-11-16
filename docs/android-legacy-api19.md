@@ -36,8 +36,10 @@ flutter pub get
 flutter build apk --release --target-platform android-arm
 ```
 
-> ✅ 依赖解析与 Dart 编译已通过（Flutter 3.19.6 验证零编译错误），
-> 下一步验证实际 APK 产出。
+> ✅ **2026-11-17 已在 GitHub Actions 上构建成功**：APK 产物
+> `release-Android-legacy-api19`（约 67 MiB），run
+> [#43905709095](https://github.com/infini2020/demo/actions/runs/43905709095)。
+> 完整阻塞点清单见下文「CI 实测状态」。
 
 `-Plegacy-apk` / `NIPAPLAY_LEGACY=1` 会同时切换 `android/build.gradle`（NDK/Kotlin 版本）
 与 `android/app/build.gradle`（minSdk/targetSdk/ABI）中的 legacy 分支。
@@ -161,11 +163,19 @@ fluent_ui 4.9+ `thumbBallInnerFactor` → 删除等。
    error，但 Android 构建用 `dart:io` 条件 import 路径，不编译这些文件，
    不影响 APK 构建。
 
-## CI 实测状态（2026-11-16）
+## CI 实测状态（2026-11-16 ~ 11-17）
 
-已在 GitHub Actions 上用 `build-android-legacy.yml` 连续触发多次构建，逐层暴露并修掉了
-基础设施问题。**依赖解析与 Dart 编译已通过**（lib/ 和 packages/*/lib 零编译错误），
-下一步验证实际 APK 产出。
+在 GitHub Actions 上用 `build-android-legacy.yml` 反复触发构建，逐层暴露并修掉了
+10 余个阻塞点，**最终构建成功并产出 APK**。
+
+### 产物
+
+| 项 | 值 |
+|---|---|
+| Artifact | `release-Android-legacy-api19`（约 67 MiB）|
+| 文件名 | `NipaPlay-<version>-Android-4.4-legacy-armeabi-v7a.apk` |
+| 成功 run | [#43905709095](https://github.com/infini2020/demo/actions/runs/43905709095) |
+| 构建耗时 | 约 9 分钟（含依赖解析、NDK 安装、C++ 与 Dart AOT）|
 
 ### 已修复的阻塞点
 
@@ -178,8 +188,25 @@ fluent_ui 4.9+ `thumbBallInnerFactor` → 删除等。
 | 5 | `flutter build apk` | pubspec 的 `version` 没有 `+构建号` | workflow 传 `--build-number` |
 | 6 | Dart 编译 | `fluent_ui 4.9.2` 用 `WidgetState*`（3.22+） | 降到 4.7.7（用自己的 `ButtonState`） |
 | 7 | Dart 编译 | `Color.r/g/b/a`、`CupertinoMediaQuery`、`GlassMediaQuery` 等 3.27 API | `fix_legacy_manual.py` 批量迁移 |
-| 8 | Dart 编译 | fluent_ui `MaterialStateProperty` vs `ButtonState` 类型不匹配 | 转换为 `fluent.ButtonState`（带前缀） |
+| 8 | Dart 编译 | fluent_ui `MaterialStateProperty` vs `ButtonState` 类型不匹配 | 转换为 `fluent.ButtonState`（静态方法、无 `const`） |
 | 9 | Dart 编译 | liquid_glass `BackdropKey`/`ImageFilter.shader`/`SpringDescription.withDurationAndBounce` | stub + 降级 + `legacySpring()` helper |
+| 10 | Dart 编译 | `CupertinoSwitch.activeTrackColor` 与 `SliderThemeData.activeTrackColor` 方向相反 | 只在构造 `CupertinoSwitch` 的文件里改名 |
+| 11 | Dart 编译 | 3.19 的 `CupertinoLocalizations` 没有 `cancelButtonLabel` | 精确改写为 `MaterialLocalizations` 并补 material import |
+| 12 | C++ 编译 | NDK r25b 的 libc++ 没有 `std::bit_cast` | 改用 `__builtin_bit_cast`（回退 `std::bit_cast`） |
+| 13 | Java 编译 | `media_kit_video` 用 3.24+ 的 `TextureRegistry.SurfaceProducer.Callback` | 去掉接口/`setCallback`/`@Override`，保留手动生命周期调用 |
+| 14 | Kotlin 编译 | `screen_brightness_android 2.1.3` 用了 `.toUri()` 但未声明 `core-ktx` | `patch_legacy_pub_cache.py` 补依赖 |
+| 15 | 依赖校验 | 多个插件（`universal_gamepad` 21、`erika_flutter` 26、`volume_controller` 21 等）minSdk > 19 | 统一降到 19 |
+| 16 | Manifest 合并 | `flutter_js` 的 quickjs AAR 是预编译产物、写死 minSdk 21 | `tools:overrideLibrary` 放行 |
+| 17 | Lint | `ExpiredTargetSdkVersion`（legacy 刻意 targetSdk 28）| legacy 分支关闭 release lint |
+
+### 遗留风险（构建期已放行，运行期未验证）
+
+- `tools:overrideLibrary` 放行的 quickjs（`flutter_js`）：若在 API 19 上真正调用到
+  JS 运行时，可能崩溃。
+- 被强行降到 minSdk 19 的插件（`camera_android`、`flutter_js`、`universal_gamepad`、
+  `volume_controller`、`erika_flutter` 等）是否真的在 4.4 上可用，需真机回归。
+- 上述改动全部只在 legacy 构建期生效（`scripts/*` + legacy gradle 分支），
+  主线 minSdk 26 构建不受影响。
 
 ### 不影响 APK 构建的 analyze 错误
 
