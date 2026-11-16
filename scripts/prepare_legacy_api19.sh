@@ -8,9 +8,10 @@
 #      并用 3.19 兼容 shim 替换 desktop_multi_window。
 #   4. 调用 migrate_legacy_api19.py 批量迁移 Dart 代码 API。
 #
-# 已在 CI 验证：经此脚本后 `flutter pub get` 可成功解析依赖。
-# 注意：Dart 代码编译尚未通过（仍有 454 个编译错误），详见
-#       docs/android-legacy-api19.md 的「CI 实测状态」一节。
+# 已验证：经此脚本后 `flutter pub get` + `flutter analyze` 在 Flutter 3.19.6
+# (Dart 3.3.4) 下对 lib/ 和 packages/*/lib 零编译错误。
+# 注意：packages/fluent_ui-4.15.1、cargokit、media_kit web 路径的 analyze
+#       错误不影响 Android APK 构建（不参与编译）。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -90,7 +91,10 @@ sed -i 's/^  wakelock_plus: \^1\.7\.0$/  wakelock_plus: 1.2.8/' pubspec.yaml
 sed -i 's/^  package_info_plus: \^10\.2\.1$/  package_info_plus: 8.0.2/' pubspec.yaml
 sed -i 's/^  permission_handler: \^12\.0\.0+1$/  permission_handler: 11.3.1/' pubspec.yaml
 sed -i 's/^  mobile_scanner: \^7\.2\.0$/  mobile_scanner: 5.1.1/' pubspec.yaml
-sed -i 's/^  fluent_ui: \^4\.13\.0$/  fluent_ui: 4.9.2/' pubspec.yaml
+sed -i 's/^  fluent_ui: \^4\.13\.0$/  fluent_ui: 4.7.7/' pubspec.yaml
+# fluent_ui 4.8+ 开始用 Flutter 3.22 的 WidgetState*；4.7.x 用自己的 ButtonState，
+# 独立于框架 MaterialState/WidgetState，3.19 可编译。
+# 注意：app 代码若调用了 4.8+ 新增 API，migrate 脚本不会修——需按 CI 日志手动改。
 sed -i 's/^  desktop_drop: \^0\.6\.1$/  desktop_drop: 0.4.4/' pubspec.yaml
 # flutter_svg 2.0.11+ 要求 Dart >=3.4.0。该行行尾带注释（"# 用于显示SVG图标"），
 # 用 "^...$" 锚定的 sed 匹配不上，必须保留注释整体重写。
@@ -121,7 +125,7 @@ add = '''  # Legacy (Android 4.4/Dart 3.3): pin web to 0.5.x (package:web >=1.0 
   # Plugin 2.0 的 compilerOptions DSL，legacy 的 Kotlin 1.9.24 无法解析：
   #   e: .../dynamic_color-1.9.0/android/build.gradle.kts:29 Unresolved reference: compilerOptions
   # 回退到仍是 Groovy build.gradle 的版本（dynamic_color 1.8.1 / sba 2.1.3）。
-  dynamic_color: 1.8.1
+  dynamic_color: 1.7.0
   screen_brightness_android: 2.1.3
   # Legacy: vendored frb 2.7.0 / erika 0.3.5 / universal_gamepad with relaxed SDK bounds.
   flutter_rust_bridge:
@@ -228,3 +232,8 @@ open(f,'w').write(src)
 PY
 
 echo "=== legacy 依赖与代码迁移完成 ==="
+
+# ── 迁移脚本覆盖不到的手动修复（CI 实测验证） ──
+# 已用 Flutter 3.19.6 验证：经此脚本后 lib/ 和 packages/*/lib 零编译错误。
+echo "=== [5/5] 手动修复剩余编译错误 ==="
+python3 scripts/fix_legacy_manual.py
