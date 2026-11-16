@@ -248,6 +248,26 @@ def fix_fluent_button_state():
         src = re.sub(r'\bconst\s+(fluent\.ButtonState\.(?:all|resolveWith))', r'\1', src)
         open(f,'w').write(src)
 
+def fix_media_kit_video_surface_producer():
+    """Flutter 3.19 的 TextureRegistry.SurfaceProducer 没有 Callback / setCallback。
+
+    media_kit_video 的 VideoOutput.java 实现了 3.24+ 才加入的
+    TextureRegistry.SurfaceProducer.Callback 并在构造时 setCallback(this)，
+    在 3.19 的 embedding 上编译不过（cannot find symbol: class Callback）。
+    该插件本来就会手动驱动生命周期（dispose() 里调 onSurfaceCleanup()、
+    setSurfaceSize() 里调 onSurfaceAvailable()），因此去掉接口、回调和
+    @Override 注解即可，行为不变。
+    """
+    f = ('packages/media_kit_video/android/src/main/java/'
+         'com/alexmercerind/media_kit_video/VideoOutput.java')
+    if not os.path.exists(f): return
+    src = open(f).read()
+    src = src.replace('implements TextureRegistry.SurfaceProducer.Callback {', '{')
+    src = re.sub(r'\n[ \t]*surfaceProducer\.setCallback\(this\);', '', src)
+    src = re.sub(r'[ \t]*@Override\r?\n(?=[ \t]*public void onSurface(?:Available|Cleanup)\(\))',
+                 '', src)
+    open(f,'w').write(src)
+
 def fix_cupertino_switch_track_color():
     """CupertinoSwitch.activeTrackColor (3.27+) -> trackColor (3.19)。
 
@@ -398,6 +418,7 @@ if __name__ == '__main__':
     fix_window_service_minimum_size()
     fix_bangumi_image()
     fix_fluent_button_state()
+    fix_media_kit_video_surface_producer()
     fix_cupertino_min_size()
     fix_cupertino_switch_track_color()
     fix_cupertino_cancel_label()
