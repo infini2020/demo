@@ -115,6 +115,12 @@ add = '''  # Legacy (Android 4.4/Dart 3.3): pin web to 0.5.x (package:web >=1.0 
   flutter_plugin_android_lifecycle: 2.0.17
   # flutter_svg 2.0.11+ 要求 Dart >=3.4.0，强制回退（直接依赖与传递依赖一并覆盖）。
   flutter_svg: 2.0.10+1
+  # 这两个包的新版本把 android/build.gradle 换成了 Kotlin DSL 并使用 Kotlin Gradle
+  # Plugin 2.0 的 compilerOptions DSL，legacy 的 Kotlin 1.9.24 无法解析：
+  #   e: .../dynamic_color-1.9.0/android/build.gradle.kts:29 Unresolved reference: compilerOptions
+  # 回退到仍是 Groovy build.gradle 的版本（dynamic_color 1.8.1 / sba 2.1.3）。
+  dynamic_color: 1.8.1
+  screen_brightness_android: 2.1.3
   # Legacy: vendored frb 2.7.0 / erika 0.3.5 / universal_gamepad with relaxed SDK bounds.
   flutter_rust_bridge:
     path: .legacy-patches/flutter_rust_bridge
