@@ -70,13 +70,46 @@ def patch_screen_brightness_android(cache):
     return patched
 
 
+def patch_min_sdk(cache):
+    """把 pub 缓存里所有插件的 minSdk 降到 19。
+
+    Flutter 的 Gradle 插件会校验每个 Android 插件声明的 minSdk：一旦某个插件
+    大于 app 的 minSdk，构建立刻失败，例如：
+
+        The plugin universal_gamepad requires a higher Android SDK version.
+
+    而 API 19 目标本身就要求全部插件降到 19（4.4 是"尽力而为"支持，插件是否
+    真的能在 19 上跑属于运行时问题，但不降就出不了 APK）。
+    """
+    patched = []
+    pattern = re.compile(r"(?m)^([ \t]*minSdk(?:Version)?[ \t]*(?:=[ \t]*|[ \t]+))(\d+)([ \t]*)$")
+    for pattern_path in ("*/android/build.gradle", "*/android/build.gradle.kts"):
+        for f in glob.glob(os.path.join(cache, "hosted", "pub.dev", pattern_path)):
+            src = open(f, encoding="utf-8").read()
+
+            def repl(m):
+                try:
+                    val = int(m.group(2))
+                except ValueError:
+                    return m.group(0)
+                if val <= 19:
+                    return m.group(0)
+                return m.group(1) + "19" + m.group(3)
+
+            new = pattern.sub(repl, src)
+            if new != src:
+                open(f, "w", encoding="utf-8").write(new)
+                patched.append(f)
+    return patched
+
+
 def main():
     cache = pub_cache_dir()
     if not os.path.isdir(cache):
         print(f"pub cache 不存在，跳过: {cache}")
         return 0
     total = 0
-    for fn in (patch_screen_brightness_android,):
+    for fn in (patch_screen_brightness_android, patch_min_sdk):
         for p in fn(cache):
             print(f"patched: {p}")
             total += 1

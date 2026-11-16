@@ -173,6 +173,16 @@ fi
 # 上面逐个包做的 sed 只覆盖特定写法，这里兜底。
 relax_local_pubspecs .legacy-patches/*/pubspec.yaml
 
+# vendored 副本的 Android minSdk 一并降到 19。
+# Flutter 的 Gradle 插件会校验每个 Android 插件声明的 minSdk，只要有一个大于
+# app 的 minSdk 就整体失败（CI 曾报 "The plugin universal_gamepad requires a
+# higher Android SDK version"）。erika_flutter 默认 26、universal_gamepad 默认 21。
+for g in .legacy-patches/*/android/build.gradle; do
+  [ -f "$g" ] || continue
+  sed -i -E 's/(minSdk(Version)?[[:space:]]*=[[:space:]]*)2[0-9]([[:space:]]*)$/\1 19/' "$g"
+  sed -i -E 's/(minSdkVersion[[:space:]]+)2[0-9]([[:space:]]*)$/\1 19/' "$g"
+done
+
 # desktop_multi_window：用 3.19 shim 替换（fork 依赖 Flutter 3.44 私有窗口 API）
 cp scripts/legacy_desktop_multi_window_shim.dart \
    packages/desktop_multi_window/lib/desktop_multi_window.dart
