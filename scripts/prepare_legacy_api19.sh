@@ -183,6 +183,16 @@ for g in .legacy-patches/*/android/build.gradle; do
   sed -i -E 's/(minSdkVersion[[:space:]]+)2[0-9]([[:space:]]*)$/\1 19/' "$g"
 done
 
+# 仓库内的 path 插件（packages/*、third_party/*）同理：只要声明了高于 19 的
+# minSdk，Flutter 工具就会拒绝构建（CI 曾报 "The plugin volume_controller
+# requires a higher Android SDK version"）。legacy 构建统一降到 19——
+# adaptive_platform_ui / nipaplay_smb2 / fvp 已有 legacy 分支，这里只是兜底。
+for g in packages/*/android/build.gradle third_party/*/android/build.gradle; do
+  [ -f "$g" ] || continue
+  sed -i -E 's/^([[:space:]]*minSdk(Version)?[[:space:]]*=[[:space:]]*)2[0-9]([[:space:]]*)$/\1 19/' "$g"
+  sed -i -E 's/^([[:space:]]*minSdkVersion[[:space:]]+)2[0-9]([[:space:]]*)$/\1 19/' "$g"
+done
+
 # desktop_multi_window：用 3.19 shim 替换（fork 依赖 Flutter 3.44 私有窗口 API）
 cp scripts/legacy_desktop_multi_window_shim.dart \
    packages/desktop_multi_window/lib/desktop_multi_window.dart
