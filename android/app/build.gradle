@@ -5,6 +5,21 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+// Android 4.4.2 (API 19) legacy 构建开关（与 android/build.gradle 判定一致）
+def isLegacyBuild = project.hasProperty("legacy-apk") || System.getenv("NIPAPLAY_LEGACY") != null
+
+// Flutter 3.19 的 FlutterExtension 只有 compileSdk/minSdk/targetSdk/ndk 等字段，
+// 没有 versionCode/versionName（这两个属性自 Flutter 3.22 起才加入）。
+// 因此 legacy 构建沿用 3.19 模板的做法：读 local.properties 中 flutter 工具写入的
+// flutter.versionCode / flutter.versionName（见 flutter_tools 的 gradle_utils）。
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader -> localProperties.load(reader) }
+}
+def legacyVersionCode = localProperties.getProperty('flutter.versionCode') ?: '1'
+def legacyVersionName = localProperties.getProperty('flutter.versionName') ?: '1.0'
+
 android {
     namespace = "com.aimessoft.nipaplay"
     compileSdk = flutter.compileSdkVersion
@@ -41,19 +56,23 @@ android {
         // 依赖链要求：NDK r25b（最后支持 API 19 的 NDK）、Kotlin 1.9.x、
         // Flutter ≤3.19（3.22 起 minSdk 升至 21）。ABI 需包含 armeabi-v7a。
         // legacyApk 产物为 4.4 专用分支，普通构建仍按 flutter 配置。
-        if (project.hasProperty("legacy-apk") || System.getenv("NIPAPLAY_LEGACY") != null) {
+        if (isLegacyBuild) {
             minSdkVersion 19
             targetSdk 28
             // 4.4 设备只需 arm32；减少体积并避免 64 位混淆
             ndk {
                 abiFilters 'armeabi-v7a'
             }
+            // Flutter 3.19 的 flutter 扩展没有 versionCode/versionName，
+            // 改由 local.properties（flutter 工具写入）提供，缺失时回落到默认值。
+            versionCode legacyVersionCode.toInteger()
+            versionName legacyVersionName
         } else {
             minSdkVersion 26
             targetSdk = flutter.targetSdkVersion
+            versionCode = flutter.versionCode
+            versionName = flutter.versionName
         }
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
         
         // 启用MultiDex支持
         multiDexEnabled = true
